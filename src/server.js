@@ -35,6 +35,7 @@ const allowedOrigins = (process.env.CLIENT_ORIGINS || "")
 const productionAllowed = [
   "https://chemfix-adminpanel.vercel.app",
   "https://chemfix.vercel.app",
+  "https://chm-two.vercel.app",
 ];
 
 const mergedAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionAllowed]));
