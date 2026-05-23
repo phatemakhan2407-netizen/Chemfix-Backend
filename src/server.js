@@ -29,17 +29,36 @@ const allowedOrigins = (process.env.CLIENT_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error("Origin is not allowed by CORS"));
-    },
-  }),
-);
+// Add the production Vercel origins to the allowed list (explicitly required)
+const productionAllowed = [
+  "https://chemfix-adminpanel.vercel.app",
+  "https://chemfix.vercel.app",
+];
+
+const mergedAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionAllowed]));
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      // allow server-to-server requests or tools like curl/postman
+      callback(null, true);
+      return;
+    }
+    if (mergedAllowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Origin is not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+};
+
+app.use(cors(corsOptions));
+// Ensure preflight OPTIONS requests are handled for all routes
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use("/uploads", express.static(uploadDir));
 
