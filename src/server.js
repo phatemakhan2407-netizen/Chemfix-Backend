@@ -6,6 +6,8 @@ import dns from "dns";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -73,33 +75,93 @@ const productSchema = new mongoose.Schema(
 
 const Product = mongoose.model("Product", productSchema);
 
-const storage = multer.diskStorage({
-  destination: uploadDir,
-  filename(_req, file, callback) {
-    const safeName = file.originalname.replace(/[^a-z0-9.]+/gi, "-").toLowerCase();
-    callback(null, `${Date.now()}-${safeName}`);
-  },
-});
+// Configure Cloudinary if env vars are present. Accept either a single `CLOUDINARY_URL`
+// or the individual `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
+const cloudinaryConfigured = Boolean(
+  process.env.CLOUDINARY_URL ||
+    (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET),
+);
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter(_req, file, callback) {
-    if (!file.mimetype.startsWith("image/")) {
-      callback(new Error("Only image uploads are allowed"));
-      return;
-    }
-    callback(null, true);
-  },
-});
+if (cloudinaryConfigured) {
+  if (process.env.CLOUDINARY_URL) {
+    // Example: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+    cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL });
+  } else {
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+  }
+}
+
+let upload;
+if (cloudinaryConfigured) {
+  const cloudinaryStorage = new CloudinaryStorage({
+    cloudinary,
+    params: {
+      folder: process.env.CLOUDINARY_FOLDER || "chemfix",
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+      transformation: [{ width: 1600, crop: "limit" }],
+    },
+  });
+
+  upload = multer({
+    storage: cloudinaryStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter(_req, file, callback) {
+      if (!file.mimetype.startsWith("image/")) {
+        callback(new Error("Only image uploads are allowed"));
+        return;
+      }
+      callback(null, true);
+    },
+  });
+} else {
+  const storage = multer.diskStorage({
+    destination: uploadDir,
+    filename(_req, file, callback) {
+      const safeName = file.originalname.replace(/[^a-z0-9.]+/gi, "-").toLowerCase();
+      callback(null, `${Date.now()}-${safeName}`);
+    },
+  });
+
+  upload = multer({
+    storage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter(_req, file, callback) {
+      if (!file.mimetype.startsWith("image/")) {
+        callback(new Error("Only image uploads are allowed"));
+        return;
+      }
+      callback(null, true);
+    },
+  });
+}
 
 function productDto(req, product) {
   const baseUrl = `${req.protocol}://${req.get("host")}`;
+  let imageUrl = "";
+  if (!product.image) {
+    imageUrl = "";
+  } else if (product.image.startsWith("http")) {
+    imageUrl = product.image;
+  } else if (cloudinaryConfigured) {
+    // `product.image` is treated as Cloudinary public_id
+    try {
+      imageUrl = cloudinary.url(product.image, { secure: true });
+    } catch {
+      imageUrl = `${baseUrl}/uploads/${product.image}`;
+    }
+  } else {
+    imageUrl = `${baseUrl}/uploads/${product.image}`;
+  }
+
   return {
     id: product._id.toString(),
     title: product.title,
     description: product.description,
-    imageUrl: `${baseUrl}/uploads/${product.image}`,
+    imageUrl,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   };
@@ -119,6 +181,12 @@ function requireAuth(req, res, next) {
 
 function deleteImage(filename) {
   if (!filename) return;
+  if (cloudinaryConfigured) {
+    // filename expected to be Cloudinary public_id
+    cloudinary.uploader.destroy(filename).catch(() => {});
+    return;
+  }
+
   const imagePath = path.join(uploadDir, filename);
   if (imagePath.startsWith(uploadDir)) {
     fs.promises.unlink(imagePath).catch(() => {});
