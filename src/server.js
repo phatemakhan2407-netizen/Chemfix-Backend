@@ -332,7 +332,23 @@ app.use((error, _req, res, _next) => {
 
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => {
+  .then(async () => {
+    // Auto-seed admin user on startup
+    try {
+      const existingAdmin = await User.findOne({ email: "admin@chemfix.com" });
+      if (!existingAdmin) {
+        const hashedPassword = await bcrypt.hash("admin123", 10);
+        await User.create({
+          email: "admin@chemfix.com",
+          password: hashedPassword,
+          role: "admin",
+        });
+        console.log("✓ Admin user created successfully");
+      }
+    } catch (error) {
+      console.error("Error seeding admin user:", error.message);
+    }
+
     app.listen(port, () => {
       console.log(`CHEMfix API running on http://localhost:${port}`);
     });
