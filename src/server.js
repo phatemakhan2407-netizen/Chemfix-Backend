@@ -34,6 +34,7 @@ const allowedOrigins = (process.env.CLIENT_ORIGINS || "")
 // Add the production Vercel origins to the allowed list (explicitly required)
 const productionAllowed = [
   "https://chemfix-adminpanel.vercel.app",
+  "https://chemfix-adminpanel-blond.vercel.app",
   "https://chemfix.vercel.app",
   "https://chm-two.vercel.app",
 ];
