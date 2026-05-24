@@ -6,6 +6,7 @@ import dns from "dns";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import multer from "multer";
+import bcrypt from "bcryptjs";
 import { v2 as cloudinary } from "cloudinary";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 import path from "path";
@@ -75,7 +76,17 @@ const productSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+const userSchema = new mongoose.Schema(
+  {
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ["admin", "user"], default: "user" },
+  },
+  { timestamps: true },
+);
+
 const Product = mongoose.model("Product", productSchema);
+const User = mongoose.model("User", userSchema);
 
 // Configure Cloudinary if env vars are present. Accept either a single `CLOUDINARY_URL`
 // or the individual `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
@@ -215,18 +226,34 @@ app.get("/", (_req, res) => {
   );
 });
 
-app.post("/api/auth/login", (req, res) => {
-  const { email, password } = req.body || {};
-  const validEmail = email === process.env.ADMIN_EMAIL;
-  const validPassword = password === process.env.ADMIN_PASSWORD;
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const { email, password } = req.body || {};
+    
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password are required." });
+      return;
+    }
 
-  if (!validEmail || !validPassword) {
-    res.status(401).json({ message: "Invalid email or password." });
-    return;
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    if (!user) {
+      res.status(401).json({ message: "Invalid email or password." });
+      return;
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    
+    if (!isPasswordValid) {
+      res.status(401).json({ message: "Invalid email or password." });
+      return;
+    }
+
+    const token = jwt.sign({ email: user.email, role: user.role }, jwtSecret, { expiresIn: "8h" });
+    res.json({ token, admin: { email: user.email, role: user.role } });
+  } catch (error) {
+    next(error);
   }
-
-  const token = jwt.sign({ email }, jwtSecret, { expiresIn: "8h" });
-  res.json({ token, admin: { email } });
 });
 
 app.get("/api/products", async (req, res, next) => {
