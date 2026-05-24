@@ -38,6 +38,7 @@ const productionAllowed = [
   "https://chemfix-adminpanel-blond.vercel.app",
   "https://chemfix.vercel.app",
   "https://chm-two.vercel.app",
+  "https://chm-peach.vercel.app",
 ];
 
 const mergedAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionAllowed]));
