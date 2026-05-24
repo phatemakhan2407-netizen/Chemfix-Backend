@@ -25,20 +25,24 @@ fs.mkdirSync(uploadDir, { recursive: true });
 
 const app = express();
 const port = process.env.PORT || 5000;
-const jwtSecret = process.env.JWT_SECRET || "change-this-secret";
+const jwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? "" : "change-this-secret");
+
+if (!jwtSecret) {
+  throw new Error("JWT_SECRET is required in production.");
+}
+
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
 
 const allowedOrigins = (process.env.CLIENT_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-// Add the production Vercel origins to the allowed list (explicitly required)
 const productionAllowed = [
-  "https://chemfix-adminpanel.vercel.app",
-  "https://chemfix-adminpanel-blond.vercel.app",
-  "https://chemfix.vercel.app",
-  "https://chm-two.vercel.app",
-  "https://chm-peach.vercel.app",
+  "https://chemfix.org",
+  "https://www.chemfix.org",
+  "https://admin.chemfix.org",
 ];
 
 const mergedAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionAllowed]));
@@ -62,11 +66,26 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  next();
+});
+
 app.use(cors(corsOptions));
 // Ensure preflight OPTIONS requests are handled for all routes
 app.options("*", cors(corsOptions));
-app.use(express.json());
-app.use("/uploads", express.static(uploadDir));
+app.use(express.json({ limit: "1mb" }));
+app.use("/uploads", express.static(uploadDir, {
+  maxAge: "30d",
+  immutable: true,
+  setHeaders(res) {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  },
+}));
 
 const productSchema = new mongoose.Schema(
   {
@@ -334,17 +353,21 @@ app.use((error, _req, res, _next) => {
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(async () => {
-    // Auto-seed admin user on startup
     try {
-      const existingAdmin = await User.findOne({ email: "admin@chemfix.com" });
-      if (!existingAdmin) {
-        const hashedPassword = await bcrypt.hash("admin123", 10);
-        await User.create({
-          email: "admin@chemfix.com",
-          password: hashedPassword,
-          role: "admin",
-        });
-        console.log("✓ Admin user created successfully");
+      const adminEmail = process.env.ADMIN_EMAIL;
+      const adminPassword = process.env.ADMIN_PASSWORD;
+
+      if (adminEmail && adminPassword) {
+        const existingAdmin = await User.findOne({ email: adminEmail.toLowerCase() });
+        if (!existingAdmin) {
+          const hashedPassword = await bcrypt.hash(adminPassword, 12);
+          await User.create({
+            email: adminEmail.toLowerCase(),
+            password: hashedPassword,
+            role: "admin",
+          });
+          console.log("Admin user created successfully");
+        }
       }
     } catch (error) {
       console.error("Error seeding admin user:", error.message);
